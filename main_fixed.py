@@ -78,6 +78,7 @@ WEEKLY_SUMMARY_DAY = 6
 
 MOOD_LOG_PATH = Path(os.environ.get("MOOD_LOG_PATH", "mood_log.jsonl"))
 REMINDER_LOG_PATH = Path(os.environ.get("REMINDER_LOG_PATH", "reminders.json"))
+TEST_LOG_PATH = Path(os.environ.get("TEST_LOG_PATH", "test_log.jsonl"))
 
 MOOD_RESPONSE_TTL = timedelta(hours=2)
 
@@ -97,6 +98,179 @@ MOOD_CHECKIN_QUESTIONS = {
     "обед": "Обеденный чек-ин 🍽 Как ты себя чувствуешь?",
     "после обеда": "Как прошла вторая половина дня, как ты себя ощущаешь?",
     "ночь": "Перед сном — как прошёл день в целом, как ты сейчас?",
+}
+
+# Шкала настроения 1-10 со смайликами для кнопок check-in.
+MOOD_SCALE_EMOJI = {
+    1: "😭",
+    2: "😢",
+    3: "😟",
+    4: "😕",
+    5: "😐",
+    6: "🙂",
+    7: "😊",
+    8: "😄",
+    9: "😁",
+    10: "🤩",
+}
+
+
+def build_mood_keyboard(slot: str) -> InlineKeyboardMarkup:
+    """Клавиатура с кнопками 1-10, по 5 в ряд, с соответствующими смайликами."""
+    row1 = [
+        InlineKeyboardButton(f"{n}{MOOD_SCALE_EMOJI[n]}", callback_data=f"mood:{slot}:{n}")
+        for n in range(1, 6)
+    ]
+    row2 = [
+        InlineKeyboardButton(f"{n}{MOOD_SCALE_EMOJI[n]}", callback_data=f"mood:{slot}:{n}")
+        for n in range(6, 11)
+    ]
+    return InlineKeyboardMarkup([row1, row2])
+
+
+# ---------------------------------------------------------------------------
+# Психологические тесты (self-report опросники).
+#
+# Важно: это не диагностические инструменты, а способ немного лучше понять
+# своё состояние. У каждого теста есть шкала ответов (options), список
+# вопросов (questions) и диапазоны интерпретации результата (ranges).
+# reverse_indices — индексы вопросов (с 0), где балл переворачивается
+# (max_option_value - value), потому что вопрос сформулирован "наоборот".
+# ---------------------------------------------------------------------------
+
+FREQUENCY_OPTIONS_0_3 = [
+    {"text": "Совсем нет", "value": 0},
+    {"text": "Несколько дней", "value": 1},
+    {"text": "Более половины дней", "value": 2},
+    {"text": "Почти каждый день", "value": 3},
+]
+
+TESTS = {
+    "gad7": {
+        "title": "Тест на тревожность (GAD-7)",
+        "menu_label": "😟 Тревожность (GAD-7)",
+        "intro": (
+            "Опросник GAD-7 помогает оценить уровень тревожности за последние "
+            "2 недели. Отвечай так, как было на самом деле, а не так, как "
+            "«правильно»."
+        ),
+        "questions": [
+            "Ощущение нервозности, тревоги или того, что вы на взводе",
+            "Неспособность остановить или контролировать беспокойство",
+            "Слишком сильное беспокойство по разным поводам",
+            "Трудности с тем, чтобы расслабиться",
+            "Такое беспокойство, что трудно усидеть на месте",
+            "Лёгкая раздражительность, вспыльчивость",
+            "Ощущение, что вот-вот случится что-то ужасное",
+        ],
+        "options": FREQUENCY_OPTIONS_0_3,
+        "max_option_value": 3,
+        "reverse_indices": set(),
+        "ranges": [
+            (0, 4, "Минимальный уровень тревожности."),
+            (5, 9, "Лёгкий уровень тревожности."),
+            (10, 14, "Умеренный уровень тревожности — стоит обратить на это внимание."),
+            (15, 21, "Выраженный уровень тревожности. Хорошим шагом было бы обсудить это со специалистом."),
+        ],
+    },
+    "phq9": {
+        "title": "Тест на настроение (PHQ-9)",
+        "menu_label": "😔 Настроение (PHQ-9)",
+        "intro": (
+            "Опросник PHQ-9 помогает оценить симптомы подавленного настроения "
+            "за последние 2 недели. Это не диагноз, а ориентир для разговора "
+            "с собой или со специалистом."
+        ),
+        "questions": [
+            "Мало интереса или удовольствия от того, чем вы занимаетесь",
+            "Подавленность, грусть или чувство безнадёжности",
+            "Проблемы со сном — трудно засыпать, частые пробуждения или, наоборот, слишком много сна",
+            "Усталость или упадок сил",
+            "Плохой аппетит или, наоборот, переедание",
+            "Плохое мнение о себе — ощущение, что вы неудачница или подвели себя/близких",
+            "Трудности с концентрацией внимания (например, при чтении или просмотре чего-либо)",
+            "Заметно медленные движения/речь или, наоборот, необычная суетливость",
+            "Мысли о том, что было бы лучше умереть, или мысли причинить себе вред",
+        ],
+        "options": FREQUENCY_OPTIONS_0_3,
+        "max_option_value": 3,
+        "reverse_indices": set(),
+        "ranges": [
+            (0, 4, "Минимальные проявления сниженного настроения."),
+            (5, 9, "Лёгкие проявления сниженного настроения."),
+            (10, 14, "Умеренные проявления — стоит обратить на это внимание."),
+            (15, 19, "Умеренно выраженные проявления. Хорошо бы обсудить это со специалистом."),
+            (20, 27, "Выраженные проявления. Очень рекомендуется обсудить это со специалистом."),
+        ],
+        "crisis_question_index": 8,
+    },
+    "pss10": {
+        "title": "Тест на уровень стресса (PSS-10)",
+        "menu_label": "😣 Уровень стресса (PSS-10)",
+        "intro": (
+            "Шкала воспринимаемого стресса за последний месяц. Отвечай, "
+            "насколько часто у тебя возникали такие мысли и чувства."
+        ),
+        "questions": [
+            "Вы расстраивались из-за чего-то, что случилось неожиданно",
+            "Вы чувствовали, что не можете контролировать важные вещи в своей жизни",
+            "Вы чувствовали нервозность и напряжение (стресс)",
+            "Вы были уверены в своей способности справляться с личными проблемами",
+            "Вы чувствовали, что дела идут так, как вам хочется",
+            "Вы чувствовали, что не справляетесь со всем, что нужно сделать",
+            "Вы могли контролировать раздражение в своей жизни",
+            "Вы чувствовали, что держите ситуацию под контролем",
+            "Вы злились из-за того, что не могли повлиять на ситуацию",
+            "Вы чувствовали, что трудности накапливаются настолько, что вы не можете их преодолеть",
+        ],
+        "options": [
+            {"text": "Никогда", "value": 0},
+            {"text": "Почти никогда", "value": 1},
+            {"text": "Иногда", "value": 2},
+            {"text": "Довольно часто", "value": 3},
+            {"text": "Очень часто", "value": 4},
+        ],
+        "max_option_value": 4,
+        "reverse_indices": {3, 4, 6, 7},
+        "ranges": [
+            (0, 13, "Низкий уровень воспринимаемого стресса."),
+            (14, 26, "Умеренный уровень стресса."),
+            (27, 40, "Высокий уровень стресса — стоит подумать о поддержке и разгрузке."),
+        ],
+    },
+    "rosenberg": {
+        "title": "Тест на самооценку (шкала Розенберга)",
+        "menu_label": "🪞 Самооценка (Розенберг)",
+        "intro": (
+            "Классическая шкала самооценки. Отвечай, насколько ты согласна "
+            "с каждым утверждением о себе."
+        ),
+        "questions": [
+            "В целом я удовлетворена собой",
+            "Иногда мне кажется, что я совсем никчёмна",
+            "Я чувствую, что у меня есть ряд хороших качеств",
+            "Я способна делать что-то не хуже большинства других людей",
+            "Мне кажется, что мне особо нечем гордиться",
+            "Иногда я чувствую себя действительно бесполезной",
+            "Я чувствую, что я ценный человек, по крайней мере не хуже других",
+            "Я хотела бы уважать себя больше",
+            "В целом я склонна считать себя неудачницей",
+            "Я отношусь к себе положительно",
+        ],
+        "options": [
+            {"text": "Совершенно не согласна", "value": 0},
+            {"text": "Не согласна", "value": 1},
+            {"text": "Согласна", "value": 2},
+            {"text": "Полностью согласна", "value": 3},
+        ],
+        "max_option_value": 3,
+        "reverse_indices": {1, 4, 5, 7, 8},
+        "ranges": [
+            (0, 14, "Заниженная самооценка — возможно, стоит уделить этому внимание, например, в работе с психологом."),
+            (15, 25, "Самооценка в пределах обычного диапазона."),
+            (26, 30, "Высокая самооценка."),
+        ],
+    },
 }
 
 PSYCHOLOGIST_SYSTEM_PROMPT = """\
@@ -537,22 +711,15 @@ async def send_mood_checkin(context: ContextTypes.DEFAULT_TYPE):
         "Как ты себя чувствуешь?",
     )
 
-    keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("😊 Хорошо", callback_data=f"mood:{slot}:good"),
-                InlineKeyboardButton("😐 Нормально", callback_data=f"mood:{slot}:ok"),
-            ],
-            [
-                InlineKeyboardButton("😔 Плохо", callback_data=f"mood:{slot}:bad"),
-                InlineKeyboardButton("😰 Тревожно", callback_data=f"mood:{slot}:anxious"),
-            ],
-        ]
-    )
+    keyboard = build_mood_keyboard(slot)
 
     await context.bot.send_message(
         chat_id=TARGET_CHAT_ID,
-        text=question + "\n\nМожно выбрать вариант ниже или просто написать своими словами.",
+        text=(
+            question
+            + "\n\nОцени по шкале от 1 (совсем плохо) до 10 (отлично) "
+            + "или просто напиши своими словами."
+        ),
         reply_markup=keyboard,
     )
     log.info("Отправлен check-in: %s", slot)
@@ -567,16 +734,17 @@ async def handle_mood_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if len(parts) != 3:
         return
 
-    _, slot, mood_label = parts
+    _, slot, score_raw = parts
 
-    labels = {
-        "good": "😊 Хорошо",
-        "ok": "😐 Нормально",
-        "bad": "😔 Плохо",
-        "anxious": "😰 Тревожно",
-    }
+    try:
+        score = int(score_raw)
+    except ValueError:
+        return
 
-    label = labels.get(mood_label, mood_label)
+    score = max(1, min(10, score))
+    emoji = MOOD_SCALE_EMOJI.get(score, "")
+    label = f"{score}/10 {emoji}"
+
     log_mood_entry(slot, label, source="button", mood_label=label)
 
     context.chat_data.pop("awaiting_mood", None)
@@ -585,6 +753,169 @@ async def handle_mood_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.message.reply_text(
         f"Записала ❤️ {label}\nЕсли хочешь, можешь написать пару слов о том, что повлияло на состояние."
     )
+
+
+def log_test_result(test_id: str, score: int, interpretation: str, answers: list[int]):
+    entry = {
+        "timestamp": now_local().isoformat(),
+        "test_id": test_id,
+        "score": score,
+        "interpretation": interpretation,
+        "answers": answers,
+    }
+    with TEST_LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def interpret_test_score(test: dict, score: int) -> str:
+    for low, high, label in test["ranges"]:
+        if low <= score <= high:
+            return label
+    return "Не удалось определить диапазон результата."
+
+
+async def show_tests_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    buttons = [
+        [InlineKeyboardButton(test["menu_label"], callback_data=f"test:start:{test_id}")]
+        for test_id, test in TESTS.items()
+    ]
+    await update.message.reply_text(
+        "Вот небольшие тесты-опросники, можешь пройти любой, если захочется 🌷\n\n"
+        "Это не диагностика, а просто способ немного лучше понять себя. "
+        "Если что-то из результатов тебя беспокоит — это хороший повод "
+        "поговорить со специалистом.",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def send_test_question(context: ContextTypes.DEFAULT_TYPE, chat_id: int, test_id: str, index: int):
+    test = TESTS[test_id]
+    total = len(test["questions"])
+    question_text = test["questions"][index]
+
+    option_rows = [
+        [InlineKeyboardButton(opt["text"], callback_data=f"test:answer:{opt['value']}")]
+        for opt in test["options"]
+    ]
+    option_rows.append([InlineKeyboardButton("✖️ Отменить тест", callback_data="test:cancel")])
+
+    prefix = ""
+    if index == 0:
+        prefix = test["intro"] + "\n\n"
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"{prefix}📝 {test['title']}\n"
+            f"Вопрос {index + 1} из {total}:\n\n"
+            f"{question_text}"
+        ),
+        reply_markup=InlineKeyboardMarkup(option_rows),
+    )
+
+
+async def finish_test(context: ContextTypes.DEFAULT_TYPE, chat_id: int, state: dict):
+    test = TESTS[state["id"]]
+    answers = state["answers"]
+    max_val = test["max_option_value"]
+    reverse_indices = test.get("reverse_indices", set())
+
+    score = 0
+    for idx, value in enumerate(answers):
+        score += (max_val - value) if idx in reverse_indices else value
+
+    interpretation = interpret_test_score(test, score)
+    log_test_result(state["id"], score, interpretation, answers)
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"✅ Тест «{test['title']}» завершён.\n\n"
+            f"Результат: {score} баллов.\n"
+            f"{interpretation}\n\n"
+            "Напомню: это не диагноз, а просто способ немного лучше понять себя ❤️ "
+            "Если результат тебя тревожит или сохраняется долго — можно обсудить "
+            "это со специалистом или с близким человеком."
+        ),
+    )
+
+
+async def handle_test_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data or ""
+    parts = data.split(":")
+    if len(parts) < 2:
+        return
+
+    action = parts[1]
+    chat_id = query.message.chat_id
+
+    if action == "start":
+        test_id = parts[2] if len(parts) > 2 else None
+        if test_id not in TESTS:
+            return
+        context.chat_data["active_test"] = {"id": test_id, "index": 0, "answers": []}
+        await query.edit_message_reply_markup(reply_markup=None)
+        await send_test_question(context, chat_id, test_id, 0)
+        return
+
+    if action == "cancel":
+        context.chat_data.pop("active_test", None)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(
+            "Хорошо, тест отменён ❤️ Можем вернуться к нему в любое время через /tests."
+        )
+        return
+
+    if action == "answer":
+        state = context.chat_data.get("active_test")
+        if not state:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(
+                "Похоже, тест уже завершился или был отменён. "
+                "Хочешь начать заново? Набери /tests"
+            )
+            return
+
+        try:
+            value = int(parts[2])
+        except (IndexError, ValueError):
+            return
+
+        answered_index = state["index"]
+        state["answers"].append(value)
+        await query.edit_message_reply_markup(reply_markup=None)
+
+        test = TESTS[state["id"]]
+
+        # Особая забота: если в PHQ-9 есть намёк на мысли о самоповреждении — не ждём
+        # конца теста, сразу мягко реагируем.
+        if (
+            test.get("crisis_question_index") == answered_index
+            and value > 0
+        ):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "Спасибо, что ответила честно ❤️ Я вижу, что среди ответов был пункт "
+                    "про мысли о смерти или причинении себе вреда. Мне важно не пройти мимо этого.\n\n"
+                    "Если сейчас есть непосредственная опасность — пожалуйста, обратись "
+                    "в экстренную службу или позови кого-то, кому доверяешь, чтобы побыть рядом. "
+                    "Если опасности нет, но эти мысли тебя тревожат — напиши мне об этом, "
+                    "как только закончишь тест, или прямо сейчас, и мы поговорим."
+                ),
+            )
+
+        next_index = answered_index + 1
+        if next_index < len(test["questions"]):
+            state["index"] = next_index
+            await send_test_question(context, chat_id, state["id"], next_index)
+        else:
+            await finish_test(context, chat_id, state)
+            context.chat_data.pop("active_test", None)
+        return
 
 
 async def send_weekly_summary(context: ContextTypes.DEFAULT_TYPE):
@@ -716,6 +1047,17 @@ async def reply_to_text(
     if not user_text.strip():
         return
 
+    if context.chat_data.get("active_test"):
+        if is_crisis_text(user_text):
+            context.chat_data.pop("active_test", None)
+            await send_crisis_support(update)
+            return
+        await update.message.reply_text(
+            "Мы сейчас проходим тест — выбери, пожалуйста, вариант ответа кнопкой "
+            "выше ⬆️ или нажми «✖️ Отменить тест», если хочешь остановиться."
+        )
+        return
+
     # ВАЖНО: сначала обрабатываем напоминание и сразу выходим.
     # Поэтому «мне плохо» после напоминания больше не превращается в повтор напоминания.
     reminder_data = parse_reminder(user_text)
@@ -824,8 +1166,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• «напомни завтра в 09:30 позвонить»\n"
         "• «напомни через 40 минут выйти»\n"
         "• «каждый день в 18:00 принять лекарство»\n\n"
-        "А ещё я буду несколько раз в день спрашивать, как ты себя чувствуешь, "
-        "и по воскресеньям присылать недельную сводку ❤️"
+        "А ещё я буду несколько раз в день спрашивать, как ты себя чувствуешь "
+        "(можно ответить кнопкой от 1 до 10 или своими словами), "
+        "и по воскресеньям присылать недельную сводку ❤️\n\n"
+        "Набери /tests, если захочешь пройти один из небольших тестов-опросников."
     )
 
 
@@ -850,7 +1194,9 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("tests", show_tests_menu))
     app.add_handler(CallbackQueryHandler(handle_mood_button, pattern=r"^mood:"))
+    app.add_handler(CallbackQueryHandler(handle_test_button, pattern=r"^test:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_error_handler(error_handler)
